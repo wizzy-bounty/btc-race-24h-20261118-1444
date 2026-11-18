@@ -56,6 +56,11 @@ MAX_SLIPPAGE_BPS = 300     # 1-minute moves are tiny (no dev bar moved >100 bps)
                            # 300 bps keeps fills from ever being rejected on slippage
 
 
+def bps_ratio(numerator, denominator):
+    """Distance between two prices in basis points: +100 bps = 1% above."""
+    return (numerator / denominator - 1.0) * 10000.0
+
+
 class Ema:
     """An exponential moving average over integer closes, seeded at the first close."""
 
@@ -91,7 +96,7 @@ class Bot:
         ema_dip = self.ema_dip.update(close)
         ema_fast = self.ema_fast.update(close)
         ema_slow = self.ema_slow.update(close)
-        gap_bps = (ema_fast / ema_slow - 1.0) * 10000.0
+        gap_bps = bps_ratio(ema_fast, ema_slow)
         prev_gap = self.prev_gap_bps
         self.prev_gap_bps = gap_bps
 
@@ -103,7 +108,7 @@ class Bot:
     def _maybe_enter(self, state, close, ema_dip, gap_bps, prev_gap):
         idx = state.seq
         # DIP leg: a deep discount to the slow EMA, once the EMA has history.
-        if idx >= DIP_WARMUP and (ema_dip / close - 1.0) * 10000.0 >= DIP_BPS:
+        if idx >= DIP_WARMUP and bps_ratio(ema_dip, close) >= DIP_BPS:
             self._open(close, "dip")
             return [self._buy(state)]
         # TREND leg: the fast/slow gap crosses up through the hysteresis band.
@@ -122,15 +127,15 @@ class Bot:
             self.peak_close = close
         if close > self.peak_close:
             self.peak_close = close
-        gain_bps = (close / self.entry_close - 1.0) * 10000.0
-        trail_bps = (self.peak_close / close - 1.0) * 10000.0
+        gain_bps = bps_ratio(close, self.entry_close)
+        trail_bps = bps_ratio(self.peak_close, close)
         if gain_bps >= TAKE_PROFIT_BPS:
             return [self._sell_all(qty)]
         if trail_bps >= TRAILING_STOP_BPS:
             return [self._sell_all(qty)]
         if gain_bps <= -HARD_STOP_BPS:
             return [self._sell_all(qty)]
-        if self.mode == "dip" and (close / ema_dip - 1.0) * 10000.0 >= DIP_EXIT_BPS:
+        if self.mode == "dip" and bps_ratio(close, ema_dip) >= DIP_EXIT_BPS:
             return [self._sell_all(qty)]
         if (
             self.mode == "trend"
